@@ -1,0 +1,5 @@
+token.txt
+bashmaq_reports.db
+_pycache_/
+*.pyc
+.env

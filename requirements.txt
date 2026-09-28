@@ -1,0 +1,6 @@
+python-telegram-bot>=21.0
+jdatetime
+Pillow
+arabic-reshaper
+python-bidi
+reportlab
