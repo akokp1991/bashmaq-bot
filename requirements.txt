@@ -4,3 +4,4 @@ Pillow
 arabic-reshaper
 python-bidi
 reportlab
+flask

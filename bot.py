@@ -5,6 +5,8 @@ import textwrap
 import shutil
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
+from threading import Thread
+from flask import Flask
 
 import jdatetime
 import arabic_reshaper
@@ -25,7 +27,25 @@ from telegram.ext import (
 )
 
 # ============================================================
-# تنظیمات
+# تنظیمات سرور Flask برای رفع خطای پورت Render
+# ============================================================
+app_flask = Flask("")
+
+@app_flask.route("/")
+def home():
+    return "Bashmaq Bot is alive and running 24/7!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app_flask.run(host="0.0.0.0", port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+# ============================================================
+# تنظیمات اصلی ربات
 # ============================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "bashmaq_reports.db")
@@ -40,7 +60,6 @@ FIXED_FOOTER = "آکو کهنه پوشی نماینده شرکت ایران مق
 try:
     TEHRAN = ZoneInfo("Asia/Tehran")
 except Exception:
-    # ایران از سال 2022 تغییر ساعت تابستانی ندارد؛ +03:30 برای پشتیبان مناسب است.
     from datetime import timezone
     TEHRAN = timezone(timedelta(hours=3, minutes=30))
 
@@ -61,15 +80,8 @@ def db():
 
 
 def init_db():
-    """
-    ساخت/به‌روزرسانی دیتابیس.
-    مهم: دیتابیس‌های قدیمی ربات را حذف نمی‌کنیم؛ اگر ساختار قدیمی
-    (date_g/date_s/branch_data/...) وجود داشته باشد، اطلاعات آن‌ها
-    به ساختار جدید (date/data/created_at) منتقل می‌شود.
-    """
     conn = db()
 
-    # -------------------- users --------------------
     conn.execute("""CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
@@ -102,7 +114,6 @@ def init_db():
         (now_text,)
     )
 
-    # -------------------- reports --------------------
     report_table_exists = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reports'"
     ).fetchone()
@@ -118,14 +129,9 @@ def init_db():
             row[1] for row in conn.execute("PRAGMA table_info(reports)").fetchall()
         }
 
-        # نسخه قدیمی اصلی ربات:
-        # id, date_g, date_s, branch_data, total_issued,
-        # total_cancelled, transit, export, created_by, created_at
         if "data" not in report_columns:
             if "date_g" in report_columns and "branch_data" in report_columns:
                 legacy_name = "reports_legacy_v1"
-
-                # اگر نام مهاجرت قبلاً وجود دارد، یک نام یکتا بساز.
                 if conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                     (legacy_name,)
@@ -148,7 +154,6 @@ def init_db():
 
                 for row in legacy_rows:
                     date_g, date_s, branch_data, transit, export, created_at = row
-
                     try:
                         branches = json.loads(branch_data or "[]")
                         if not isinstance(branches, list):
@@ -156,7 +161,6 @@ def init_db():
                     except Exception:
                         branches = []
 
-                    # تبدیل ساختار شعبه‌های قدیمی به ساختار جدید
                     normalized_branches = []
                     for b in branches:
                         if not isinstance(b, dict):
@@ -189,12 +193,7 @@ def init_db():
                             created_at or now_text,
                         ),
                     )
-
-                # جدول قدیمی را عمداً حذف نمی‌کنیم؛ برای پشتیبان و امکان بازگشت نگه می‌داریم.
             else:
-                # اگر ساختار ناشناخته‌ای بود، اطلاعات را حذف نمی‌کنیم.
-                # جدول فعلی را تغییر نمی‌دهیم و یک جدول جدید برای نسخه جدید می‌سازیم.
-                # در این حالت نام جدول قدیمی نگه داشته می‌شود.
                 legacy_name = "reports_legacy_unknown"
                 if conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -208,7 +207,6 @@ def init_db():
                     created_at TEXT NOT NULL
                 )""")
 
-    # مدیر اصلی
     conn.execute(
         "INSERT OR IGNORE INTO admins(user_id) VALUES (?)",
         (ADMIN_ID,)
@@ -336,7 +334,7 @@ def users_rows():
     return rows
 
 # ============================================================
-# تاریخ
+# تاریخ و منوها
 # ============================================================
 def parse_gregorian(s):
     return datetime.strptime(s.strip(), "%d/%m/%Y").date()
@@ -361,9 +359,7 @@ def is_admin(update):
 def can_use(update):
     return bool(update.effective_user and is_allowed(update.effective_user.id))
 
-# ============================================================
-# منوها
-# ============================================================
+
 def admin_menu():
     return ReplyKeyboardMarkup([
         ["📝 ثبت گزارش جدید", "🔎 جستجوی گزارش"],
@@ -383,7 +379,7 @@ def user_menu():
 
 def management_menu():
     return ReplyKeyboardMarkup([
-        ["✏️ ویرایش گزارش", "🗑 حذف گزارش"],
+        ["✏️️ ویرایش گزارش", "🗑 حذف گزارش"],
         ["📋 لیست گزارش‌ها", "👥 مدیریت کاربران"],
         ["💾 پشتیبان‌گیری"],
         ["🔙 بازگشت"],
@@ -434,9 +430,7 @@ def serial_check(branch):
 def total_issued(data):
     return sum(int(b.get("issued", 0)) for b in data.get("branches", []))
 
-# ============================================================
-# متن گزارش
-# ============================================================
+
 def create_branch_report(data):
     r = "باسلام\n\n(سه شعبه مرز باشماق)\n\n"
     r += f"در روز {data['date']}\nتاریخ شمسی: {data['shamsi_date']}\n\n"
@@ -460,9 +454,7 @@ def create_trade_report(data):
         f"صادرات : {data['export']}"
     )
 
-# ============================================================
-# آمار بازه‌ای و ماهانه
-# ============================================================
+
 def range_summary(start, end):
     rows = []
     for item in all_reports():
@@ -509,12 +501,10 @@ def range_text(start, end):
         s += "\n\n❌ در این بازه گزارشی ثبت نشده است."
     return s
 
-# ============================================================
-# JPG
-# ============================================================
+
 def make_lines(data):
     if FONT_PATH is None:
-        raise RuntimeError("فونت فارسی پیدا نشد. فایل Vazirmatn-Regular.ttf را کنار bot.py قرار دهید.")
+        raise RuntimeError("فونت فارسی پیدا نشد.")
     title = ImageFont.truetype(FONT_PATH, 58)
     sub = ImageFont.truetype(FONT_PATH, 40)
     normal = ImageFont.truetype(FONT_PATH, 34)
@@ -600,9 +590,7 @@ def create_range_jpg(start, end):
     }
     return create_jpg_report(data, "jam_bazeh")
 
-# ============================================================
-# PDF با فونت فارسی در صورت وجود
-# ============================================================
+
 PDF_FONT_NAME = None
 if FONT_PATH:
     try:
@@ -633,9 +621,7 @@ def create_pdf_report(data, prefix="gozaresh"):
     c.save()
     return path
 
-# ============================================================
-# ارسال گزارش
-# ============================================================
+
 async def send_full_report(update, data):
     await update.message.reply_text(create_branch_report(data))
     await update.message.reply_text(create_trade_report(data))
@@ -665,13 +651,13 @@ async def send_full_report(update, data):
             except OSError: pass
 
 # ============================================================
-# عمومی
+# هندلرها و مکالمات
 # ============================================================
 async def start(update, context):
     context.user_data.clear()
     save_user(update.effective_user)
     if not can_use(update):
-        await update.message.reply_text("⛔ دسترسی شما توسط مدیر غیرفعال شده است.")
+        await update.message.reply_text("⛔ دسترسی شما غیرفعال است.")
         return ConversationHandler.END
     await update.message.reply_text(
         "سلام 🌹\n\nبه ربات گزارش مرز باشماق خوش آمدید.",
@@ -690,9 +676,7 @@ async def cancel(update, context):
     await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_menu(update))
     return ConversationHandler.END
 
-# ============================================================
-# ثبت گزارش جدید
-# ============================================================
+
 async def new_report(update, context):
     save_user(update.effective_user)
     if not is_admin(update):
@@ -745,7 +729,7 @@ async def duplicate_callback(update, context):
         await q.edit_message_text("❌ عملیات لغو شد.")
         await q.message.reply_text("🏠 منوی اصلی", reply_markup=admin_menu())
         return ConversationHandler.END
-    await q.edit_message_text("✏️ گزارش قبلی در پایان این ثبت، جایگزین خواهد شد.")
+    await q.edit_message_text("✏ گزارش قبلی در پایان این ثبت، جایگزین خواهد شد.")
     context.user_data["count"] = 2
     context.user_data["current_branch"] = 1
     await q.message.reply_text("نام شعبه 1 را وارد کنید.")
@@ -757,6 +741,7 @@ async def get_count(update, context):
     context.user_data["current_branch"] = 1
     await update.message.reply_text("نام شعبه 1 را وارد کنید.")
     return NAME
+
 
 async def get_name(update, context):
     name = update.message.text.strip()
@@ -801,7 +786,7 @@ async def get_end(update, context):
             f"⚠️ تعداد صادره با بازه سریال هماهنگ نیست.\n"
             f"تعداد واردشده: {context.user_data['issued']}\n"
             f"تعداد سریال در بازه: {expected}\n\n"
-            "سریال پایان را دوباره وارد کنید یا در صورت درست بودن اطلاعات، بازه سریال را اصلاح کنید."
+            "سریال پایان را دوباره وارد کنید یا بازه سریال را اصلاح کنید."
         )
         return END
     await update.message.reply_text("تعداد ابطالی را وارد کنید. اگر ندارد 0 وارد کنید.")
@@ -867,15 +852,41 @@ async def get_export(update, context):
         return EXPORT
     context.user_data["export"] = n
     context.user_data["created_by"] = update.effective_user.id
+    
+    # ذخیره در دیتابیس
     save_report(context.user_data)
+    
+    # ارسال به ادمین/ثبت‌کننده
     await send_full_report(update, context.user_data)
+
+    # -------------------------------------------------------------
+    # ارسال خودکار متن و عکس به آیدی‌های دلخواه (آیدی شما اضافه شد)
+    # -------------------------------------------------------------
+    target_user_ids = [
+        88424146,  # آیدی شما
+    ]
+
+    for uid in target_user_ids:
+        try:
+            await context.bot.send_message(chat_id=uid, text=create_branch_report(context.user_data))
+            await context.bot.send_message(chat_id=uid, text=create_trade_report(context.user_data))
+            
+            jpg = create_jpg_report(context.user_data)
+            try:
+                with open(jpg, "rb") as f:
+                    await context.bot.send_photo(chat_id=uid, photo=f, caption="🖼️ تصویر گزارش مرز باشماق")
+            finally:
+                if os.path.exists(jpg):
+                    try: os.remove(jpg)
+                    except OSError: pass
+        except Exception as e:
+            print(f"Failed to auto-send report to {uid}: {e}")
+
     context.user_data.clear()
-    await update.message.reply_text("✅ گزارش با موفقیت ذخیره شد.", reply_markup=admin_menu())
+    await update.message.reply_text("✅ گزارش با موفقیت ذخیره و به صورت خودکار ارسال شد.", reply_markup=admin_menu())
     return ConversationHandler.END
 
-# ============================================================
-# جستجو
-# ============================================================
+
 async def search_report(update, context):
     if not can_use(update):
         await update.message.reply_text("⛔ دسترسی شما غیرفعال است.")
@@ -912,9 +923,7 @@ async def today(update, context):
     await send_full_report(update, data)
     await update.message.reply_text("✅ گزارش امروز", reply_markup=get_menu(update))
 
-# ============================================================
-# گزارش بازه‌ای
-# ============================================================
+
 async def range_start(update, context):
     if not can_use(update):
         return ConversationHandler.END
@@ -940,7 +949,7 @@ async def get_range_end(update, context):
         return RANGE_END
     start = context.user_data.get("range_start")
     if not start:
-        await update.message.reply_text("❌ تاریخ شروع پیدا نشد. دوباره از منو شروع کنید.", reply_markup=get_menu(update))
+        await update.message.reply_text("❌ تاریخ شروع پیدا نشد.", reply_markup=get_menu(update))
         context.user_data.clear()
         return ConversationHandler.END
     if end < start:
@@ -962,9 +971,7 @@ async def get_range_end(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ============================================================
-# آمار ماهانه
-# ============================================================
+
 async def month_start(update, context):
     if not can_use(update):
         return ConversationHandler.END
@@ -986,14 +993,12 @@ async def get_month(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ============================================================
-# مدیریت
-# ============================================================
+
 async def management(update, context):
     if not is_admin(update):
         await update.message.reply_text("⛔ فقط مدیر.", reply_markup=get_menu(update))
         return
-    await update.message.reply_text("⚙️ مدیریت", reply_markup=management_menu())
+    await update.message.reply_text("⚙ مدیریت", reply_markup=management_menu())
 
 
 async def edit_start(update, context):
@@ -1046,7 +1051,7 @@ async def get_delete_date(update, context):
         [InlineKeyboardButton("🗑 بله، حذف شود", callback_data=f"del_yes:{ds}")],
         [InlineKeyboardButton("❌ لغو", callback_data="del_no")],
     ])
-    await update.message.reply_text(f"⚠️ حذف گزارش {ds}؟ این عملیات قابل برگشت نیست.", reply_markup=kb)
+    await update.message.reply_text(f"⚠️ حذف گزارش {ds}؟", reply_markup=kb)
     return DELETE_DATE
 
 
@@ -1071,8 +1076,6 @@ async def list_reports(update, context):
         await update.message.reply_text("📋 هنوز گزارشی ثبت نشده است.", reply_markup=management_menu())
         return
     text = "📋 گزارش‌های ثبت‌شده:\n\n" + "\n".join(f"• {x}" for x in dates[:100])
-    if len(dates) > 100:
-        text += f"\n\n... و {len(dates) - 100} گزارش دیگر"
     await update.message.reply_text(text, reply_markup=management_menu())
 
 
@@ -1109,9 +1112,7 @@ async def user_callback(update, context):
          InlineKeyboardButton("👤 حذف مدیر", callback_data=f"ua:{uid}:unadmin")],
     ])
     await q.edit_message_text(
-        f"کاربر: {first_name or username or uid}\nID: {uid}\n"
-        f"وضعیت: {'فعال' if allowed else 'غیرفعال'}\n"
-        f"دسترسی: {'مدیر' if adm else 'کاربر'}",
+        f"کاربر: {first_name or username or uid}\nID: {uid}",
         reply_markup=kb,
     )
 
@@ -1124,16 +1125,10 @@ async def user_action(update, context):
     _, uid_s, action = q.data.split(":")
     uid = int(uid_s)
     if action in ("0", "1"):
-        if uid == ADMIN_ID and action == "0":
-            await q.answer("مدیر اصلی قابل غیرفعال شدن نیست.", show_alert=True)
-            return
         set_allowed(uid, action == "1")
     elif action == "admin":
         add_admin(uid)
     elif action == "unadmin":
-        if uid == ADMIN_ID:
-            await q.answer("مدیر اصلی قابل حذف نیست.", show_alert=True)
-            return
         remove_admin(uid)
     await q.edit_message_text("✅ تغییر اعمال شد.")
     await q.message.reply_text("⚙️ مدیریت", reply_markup=management_menu())
@@ -1143,20 +1138,18 @@ async def backup(update, context):
     if not is_admin(update):
         return
     if not os.path.exists(DB_FILE):
-        await update.message.reply_text("❌ فایل دیتابیس هنوز ساخته نشده است.", reply_markup=management_menu())
+        await update.message.reply_text("❌ فایل دیتابیس وجود ندارد.", reply_markup=management_menu())
         return
-    backup_path = os.path.join(BASE_DIR, f"bashmaq_reports_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+    backup_path = os.path.join(BASE_DIR, f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
     shutil.copy2(DB_FILE, backup_path)
     try:
         with open(backup_path, "rb") as f:
-            await update.message.reply_document(f, filename=os.path.basename(backup_path), caption="💾 پشتیبان دیتابیس گزارش‌ها")
+            await update.message.reply_document(f, filename=os.path.basename(backup_path), caption="💾 پشتیبان دیتابیس")
     finally:
         try: os.remove(backup_path)
         except OSError: pass
 
-# ============================================================
-# ارسال گزارش به کاربر دیگر
-# ============================================================
+
 async def send_report_start(update, context):
     if not is_admin(update):
         return ConversationHandler.END
@@ -1171,10 +1164,10 @@ async def get_send_date(update, context):
         await update.message.reply_text("❌ تاریخ اشتباه است.")
         return SEND_DATE
     if not load_report(ds):
-        await update.message.reply_text("❌ گزارشی برای این تاریخ پیدا نشد.")
+        await update.message.reply_text("❌ گزارشی پیدا نشد.")
         return SEND_DATE
     context.user_data["send_date"] = ds
-    await update.message.reply_text("👤 شناسه عددی تلگرام گیرنده را وارد کن.\nمثال: 123456789")
+    await update.message.reply_text("👤 شناسه عددی تلگرام گیرنده را وارد کن.")
     return SEND_USER
 
 
@@ -1184,17 +1177,16 @@ async def get_send_user(update, context):
         if uid <= 0:
             raise ValueError
     except ValueError:
-        await update.message.reply_text("❌ شناسه عددی صحیح وارد کنید.")
+        await update.message.reply_text("❌ شناسه صحیح نیست.")
         return SEND_USER
 
     ds = context.user_data.get("send_date")
     data = load_report(ds)
     if not data:
-        await update.message.reply_text("❌ گزارش دیگر پیدا نشد.", reply_markup=admin_menu())
+        await update.message.reply_text("❌ گزارش پیدا نشد.", reply_markup=admin_menu())
         context.user_data.clear()
         return ConversationHandler.END
 
-    # ساخت و ارسال مستقیم به گیرنده
     try:
         await context.bot.send_message(chat_id=uid, text=create_branch_report(data))
         await context.bot.send_message(chat_id=uid, text=create_trade_report(data))
@@ -1205,38 +1197,30 @@ async def get_send_user(update, context):
         finally:
             try: os.remove(jpg)
             except OSError: pass
-        await update.message.reply_text("✅ گزارش برای گیرنده ارسال شد.", reply_markup=admin_menu())
+        await update.message.reply_text("✅ گزارش ارسال شد.", reply_markup=admin_menu())
     except Exception as e:
-        await update.message.reply_text(f"❌ ارسال انجام نشد. ممکن است گیرنده ربات را قبلاً Start نکرده باشد.\n\nجزئیات: {e}", reply_markup=admin_menu())
+        await update.message.reply_text(f"❌ ارسال انجام نشد: {e}", reply_markup=admin_menu())
     context.user_data.clear()
     return ConversationHandler.END
 
-# ============================================================
-# بازگشت و ناشناخته
-# ============================================================
+
 async def back(update, context):
     context.user_data.clear()
     await update.message.reply_text("🏠 منوی اصلی", reply_markup=get_menu(update))
 
 
-async def unknown(update, context):
-    # پیام‌های آزاد خارج از ConversationHandler
-    if update.message and update.message.text:
-        await update.message.reply_text("لطفاً یکی از گزینه‌های منو را انتخاب کنید.", reply_markup=get_menu(update))
-
 # ============================================================
-# اجرای ربات
+# تابع اصلی اجرای ربات
 # ============================================================
 def main():
     if not TOKEN or TOKEN == "YOUR_BOT_TOKEN":
-        raise RuntimeError(
-            "توکن ربات تنظیم نشده است. TELEGRAM_TOKEN را تنظیم کنید یا token.txt را کنار bot.py قرار دهید."
-        )
+        raise RuntimeError("توکن ربات تنظیم نشده است.")
 
     init_db()
+    keep_alive()
+
     app = Application.builder().token(TOKEN).build()
 
-    # ثبت/ویرایش: یک ConversationHandler واحد تا پیام تاریخ حتماً در مرحله DATE/EDIT_DATE پردازش شود.
     report_conv = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex(r"^📝 ثبت گزارش جدید$"), new_report),
@@ -1303,7 +1287,6 @@ def main():
         fallbacks=[MessageHandler(filters.Regex(r"^❌ لغو$"), cancel)],
     )
 
-    # ConversationHandlerها اول؛ سپس هندلرهای منو.
     app.add_handler(report_conv, group=0)
     app.add_handler(search_conv, group=0)
     app.add_handler(range_conv, group=0)
@@ -1314,7 +1297,7 @@ def main():
     app.add_handler(CommandHandler("start", start), group=1)
     app.add_handler(CommandHandler("id", my_id), group=1)
     app.add_handler(MessageHandler(filters.Regex(r"^📅 گزارش امروز$"), today), group=1)
-    app.add_handler(MessageHandler(filters.Regex(r"^⚙️ مدیریت$"), management), group=1)
+    app.add_handler(MessageHandler(filters.Regex(r"^⚙ مدیریت$"), management), group=1)
     app.add_handler(MessageHandler(filters.Regex(r"^🔙 بازگشت$"), back), group=1)
     app.add_handler(MessageHandler(filters.Regex(r"^📋 لیست گزارش‌ها$"), list_reports), group=1)
     app.add_handler(MessageHandler(filters.Regex(r"^👥 مدیریت کاربران$"), user_management), group=1)
@@ -1322,7 +1305,8 @@ def main():
     app.add_handler(CallbackQueryHandler(user_callback, pattern=r"^user:"), group=1)
     app.add_handler(CallbackQueryHandler(user_action, pattern=r"^ua:"), group=1)
     app.add_handler(MessageHandler(filters.Regex(r"^❌ لغو$"), cancel), group=1)
-    print("Bot is running...")
+
+    print("Bot is running with Flask keep-alive server...")
     app.run_polling()
 
 
