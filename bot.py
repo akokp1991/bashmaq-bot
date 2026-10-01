@@ -78,10 +78,8 @@ SEND_DATE, SEND_USER = 16, 17
 def db():
     return sqlite3.connect(DB_FILE)
 
-
 def init_db():
     conn = db()
-
     conn.execute("""CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
@@ -94,9 +92,7 @@ def init_db():
         user_id INTEGER PRIMARY KEY
     )""")
 
-    user_columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()
-    }
+    user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if "is_admin" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
     if "allowed" not in user_columns:
@@ -109,116 +105,20 @@ def init_db():
         conn.execute("ALTER TABLE users ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
 
     now_text = datetime.now(TEHRAN).isoformat(timespec="seconds")
-    conn.execute(
-        "UPDATE users SET created_at=? WHERE created_at IS NULL OR created_at=''",
-        (now_text,)
-    )
+    conn.execute("UPDATE users SET created_at=? WHERE created_at IS NULL OR created_at=''", (now_text,))
 
-    report_table_exists = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reports'"
-    ).fetchone()
-
+    report_table_exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reports'").fetchone()
     if not report_table_exists:
         conn.execute("""CREATE TABLE reports (
             date TEXT PRIMARY KEY,
             data TEXT NOT NULL,
             created_at TEXT NOT NULL
         )""")
-    else:
-        report_columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(reports)").fetchall()
-        }
-
-        if "data" not in report_columns:
-            if "date_g" in report_columns and "branch_data" in report_columns:
-                legacy_name = "reports_legacy_v1"
-                if conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                    (legacy_name,)
-                ).fetchone():
-                    legacy_name = "reports_legacy_v1_" + datetime.now().strftime("%Y%m%d%H%M%S")
-
-                conn.execute(f'ALTER TABLE reports RENAME TO "{legacy_name}"')
-                conn.execute("""CREATE TABLE reports (
-                    date TEXT PRIMARY KEY,
-                    data TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                )""")
-
-                legacy_rows = conn.execute(
-                    f"""SELECT date_g, date_s, branch_data,
-                               transit, export, created_at
-                        FROM "{legacy_name}"
-                        ORDER BY id"""
-                ).fetchall()
-
-                for row in legacy_rows:
-                    date_g, date_s, branch_data, transit, export, created_at = row
-                    try:
-                        branches = json.loads(branch_data or "[]")
-                        if not isinstance(branches, list):
-                            branches = []
-                    except Exception:
-                        branches = []
-
-                    normalized_branches = []
-                    for b in branches:
-                        if not isinstance(b, dict):
-                            continue
-                        normalized_branches.append({
-                            "name": b.get("name", "بدون نام"),
-                            "issued": int(b.get("issued", 0) or 0),
-                            "start": str(b.get("start", b.get("start_serial", "0"))),
-                            "end": str(b.get("end", b.get("end_serial", "0"))),
-                            "cancelled": int(b.get("cancelled", 0) or 0),
-                            "cancelled_serial": str(
-                                b.get("cancelled_serial", "0") or "0"
-                            ),
-                        })
-
-                    data = {
-                        "date": date_g,
-                        "shamsi_date": date_s,
-                        "branches": normalized_branches,
-                        "transit": int(transit or 0),
-                        "export": int(export or 0),
-                    }
-
-                    conn.execute(
-                        """INSERT OR REPLACE INTO reports(date, data, created_at)
-                           VALUES (?, ?, ?)""",
-                        (
-                            date_g,
-                            json.dumps(data, ensure_ascii=False),
-                            created_at or now_text,
-                        ),
-                    )
-            else:
-                legacy_name = "reports_legacy_unknown"
-                if conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                    (legacy_name,)
-                ).fetchone():
-                    legacy_name = "reports_legacy_unknown_" + datetime.now().strftime("%Y%m%d%H%M%S")
-                conn.execute(f'ALTER TABLE reports RENAME TO "{legacy_name}"')
-                conn.execute("""CREATE TABLE reports (
-                    date TEXT PRIMARY KEY,
-                    data TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                )""")
-
-    conn.execute(
-        "INSERT OR IGNORE INTO admins(user_id) VALUES (?)",
-        (ADMIN_ID,)
-    )
-    conn.execute(
-        "UPDATE users SET is_admin=1, allowed=1 WHERE user_id=?",
-        (ADMIN_ID,)
-    )
-
+    
+    conn.execute("INSERT OR IGNORE INTO admins(user_id) VALUES (?)", (ADMIN_ID,))
+    conn.execute("UPDATE users SET is_admin=1, allowed=1 WHERE user_id=?", (ADMIN_ID,))
     conn.commit()
     conn.close()
-
 
 def save_user(user):
     if not user:
@@ -241,13 +141,11 @@ def save_user(user):
     conn.commit()
     conn.close()
 
-
 def is_admin_id(uid):
     conn = db()
     row = conn.execute("SELECT 1 FROM admins WHERE user_id=?", (uid,)).fetchone()
     conn.close()
     return bool(row) or uid == ADMIN_ID
-
 
 def is_allowed(uid):
     if is_admin_id(uid):
@@ -256,7 +154,6 @@ def is_allowed(uid):
     row = conn.execute("SELECT allowed FROM users WHERE user_id=?", (uid,)).fetchone()
     conn.close()
     return True if row is None else bool(row[0])
-
 
 def save_report(data):
     conn = db()
@@ -267,13 +164,11 @@ def save_report(data):
     conn.commit()
     conn.close()
 
-
 def load_report(date_text):
     conn = db()
     row = conn.execute("SELECT data FROM reports WHERE date=?", (date_text,)).fetchone()
     conn.close()
     return json.loads(row[0]) if row else None
-
 
 def delete_report(date_text):
     conn = db()
@@ -282,20 +177,17 @@ def delete_report(date_text):
     conn.close()
     return cur.rowcount > 0
 
-
 def list_dates():
     conn = db()
     rows = conn.execute("SELECT date FROM reports ORDER BY date DESC").fetchall()
     conn.close()
     return [r[0] for r in rows]
 
-
 def all_reports():
     conn = db()
     rows = conn.execute("SELECT data FROM reports ORDER BY date").fetchall()
     conn.close()
     return [json.loads(r[0]) for r in rows]
-
 
 def add_admin(uid):
     conn = db()
@@ -304,7 +196,6 @@ def add_admin(uid):
     conn.execute("UPDATE users SET is_admin=1, allowed=1 WHERE user_id=?", (uid,))
     conn.commit()
     conn.close()
-
 
 def remove_admin(uid):
     if uid == ADMIN_ID:
@@ -316,7 +207,6 @@ def remove_admin(uid):
     conn.close()
     return cur.rowcount > 0
 
-
 def set_allowed(uid, allowed):
     conn = db()
     conn.execute("INSERT OR IGNORE INTO users(user_id, allowed) VALUES (?,?)", (uid, 1 if allowed else 0))
@@ -324,12 +214,9 @@ def set_allowed(uid, allowed):
     conn.commit()
     conn.close()
 
-
 def users_rows():
     conn = db()
-    rows = conn.execute(
-        "SELECT user_id, username, first_name, allowed, is_admin FROM users ORDER BY user_id"
-    ).fetchall()
+    rows = conn.execute("SELECT user_id, username, first_name, allowed, is_admin FROM users ORDER BY user_id").fetchall()
     conn.close()
     return rows
 
@@ -339,26 +226,20 @@ def users_rows():
 def parse_gregorian(s):
     return datetime.strptime(s.strip(), "%d/%m/%Y").date()
 
-
 def norm_date(s):
     return parse_gregorian(s).strftime("%d/%m/%Y")
-
 
 def shamsi(d):
     return jdatetime.date.fromgregorian(date=d).strftime("%d/%m/%Y")
 
-
 def iran_today():
     return datetime.now(TEHRAN).date()
-
 
 def is_admin(update):
     return bool(update.effective_user and is_admin_id(update.effective_user.id))
 
-
 def can_use(update):
     return bool(update.effective_user and is_allowed(update.effective_user.id))
-
 
 def admin_menu():
     return ReplyKeyboardMarkup([
@@ -368,7 +249,6 @@ def admin_menu():
         ["📤 ارسال گزارش", "❌ لغو"],
     ], resize_keyboard=True)
 
-
 def user_menu():
     return ReplyKeyboardMarkup([
         ["🔎 جستجوی گزارش", "📊 گزارش بازه‌ای"],
@@ -376,15 +256,13 @@ def user_menu():
         ["❌ لغو"],
     ], resize_keyboard=True)
 
-
 def management_menu():
     return ReplyKeyboardMarkup([
-        ["✏️️ ویرایش گزارش", "🗑 حذف گزارش"],
+        ["✏ ویرایش گزارش", "🗑 حذف گزارش"],
         ["📋 لیست گزارش‌ها", "👥 مدیریت کاربران"],
         ["💾 پشتیبان‌گیری"],
         ["🔙 بازگشت"],
     ], resize_keyboard=True)
-
 
 def get_menu(update):
     return admin_menu() if is_admin(update) else user_menu()
@@ -402,13 +280,10 @@ def find_font():
     ]
     return next((p for p in paths if os.path.exists(p)), None)
 
-
 FONT_PATH = find_font()
-
 
 def ptext(s):
     return get_display(arabic_reshaper.reshape(str(s)))
-
 
 def safe_int(s):
     try:
@@ -416,7 +291,6 @@ def safe_int(s):
         return n if n >= 0 else None
     except Exception:
         return None
-
 
 def serial_check(branch):
     try:
@@ -426,10 +300,8 @@ def serial_check(branch):
     except Exception:
         return True, None
 
-
 def total_issued(data):
     return sum(int(b.get("issued", 0)) for b in data.get("branches", []))
-
 
 def create_branch_report(data):
     r = "باسلام\n\n(سه شعبه مرز باشماق)\n\n"
@@ -444,7 +316,6 @@ def create_branch_report(data):
     r += f"جمع کل صادرها : {total_issued(data)} فقره"
     return r
 
-
 def create_trade_report(data):
     return (
         "شعبه مرز باشماق\n\n"
@@ -453,7 +324,6 @@ def create_trade_report(data):
         f"ترانزیت : {data['transit']}\n"
         f"صادرات : {data['export']}"
     )
-
 
 def range_summary(start, end):
     rows = []
@@ -479,7 +349,6 @@ def range_summary(start, end):
 
     return rows, issued, transit, export, cancelled, branch_totals
 
-
 def range_text(start, end):
     rows, issued, transit, export, cancelled, branch_totals = range_summary(start, end)
     s = (
@@ -500,7 +369,6 @@ def range_text(start, end):
     if not rows:
         s += "\n\n❌ در این بازه گزارشی ثبت نشده است."
     return s
-
 
 def make_lines(data):
     if FONT_PATH is None:
@@ -533,7 +401,6 @@ def make_lines(data):
         (FIXED_FOOTER, sub),
     ]
     return lines
-
 
 def create_jpg_report(data, prefix="gozaresh"):
     lines = make_lines(data)
@@ -574,7 +441,6 @@ def create_jpg_report(data, prefix="gozaresh"):
     image.save(path, "JPEG", quality=95)
     return path
 
-
 def create_range_jpg(start, end):
     rows, issued, transit, export, cancelled, branch_totals = range_summary(start, end)
     branches = [
@@ -590,7 +456,6 @@ def create_range_jpg(start, end):
     }
     return create_jpg_report(data, "jam_bazeh")
 
-
 PDF_FONT_NAME = None
 if FONT_PATH:
     try:
@@ -598,7 +463,6 @@ if FONT_PATH:
         PDF_FONT_NAME = "PersianFont"
     except Exception:
         PDF_FONT_NAME = None
-
 
 def create_pdf_report(data, prefix="gozaresh"):
     filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.pdf"
@@ -620,7 +484,6 @@ def create_pdf_report(data, prefix="gozaresh"):
         y -= 19
     c.save()
     return path
-
 
 async def send_full_report(update, data):
     await update.message.reply_text(create_branch_report(data))
@@ -665,17 +528,14 @@ async def start(update, context):
     )
     return ConversationHandler.END
 
-
 async def my_id(update, context):
     save_user(update.effective_user)
     await update.message.reply_text(f"شناسه عددی تلگرام شما:\n\n{update.effective_user.id}")
-
 
 async def cancel(update, context):
     context.user_data.clear()
     await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_menu(update))
     return ConversationHandler.END
-
 
 async def new_report(update, context):
     save_user(update.effective_user)
@@ -690,7 +550,6 @@ async def new_report(update, context):
         reply_markup=ReplyKeyboardRemove(),
     )
     return DATE
-
 
 async def get_date(update, context):
     try:
@@ -720,7 +579,6 @@ async def get_date(update, context):
     await update.message.reply_text("نام شعبه 1 را وارد کنید.")
     return NAME
 
-
 async def duplicate_callback(update, context):
     q = update.callback_query
     await q.answer()
@@ -735,13 +593,11 @@ async def duplicate_callback(update, context):
     await q.message.reply_text("نام شعبه 1 را وارد کنید.")
     return NAME
 
-
 async def get_count(update, context):
     context.user_data["count"] = 2
     context.user_data["current_branch"] = 1
     await update.message.reply_text("نام شعبه 1 را وارد کنید.")
     return NAME
-
 
 async def get_name(update, context):
     name = update.message.text.strip()
@@ -752,7 +608,6 @@ async def get_name(update, context):
     await update.message.reply_text("تعداد صادره این شعبه را وارد کنید.")
     return ISSUED
 
-
 async def get_issued(update, context):
     n = safe_int(update.message.text)
     if n is None:
@@ -762,7 +617,6 @@ async def get_issued(update, context):
     await update.message.reply_text("سریال شروع را وارد کنید.\nمثال: 25044")
     return START
 
-
 async def get_start(update, context):
     s = update.message.text.strip()
     if not s:
@@ -771,7 +625,6 @@ async def get_start(update, context):
     context.user_data["start_serial"] = s
     await update.message.reply_text("سریال پایان را وارد کنید.\nمثال: 25053")
     return END
-
 
 async def get_end(update, context):
     s = update.message.text.strip()
@@ -792,7 +645,6 @@ async def get_end(update, context):
     await update.message.reply_text("تعداد ابطالی را وارد کنید. اگر ندارد 0 وارد کنید.")
     return CANCELLED
 
-
 async def get_cancelled(update, context):
     n = safe_int(update.message.text)
     if n is None:
@@ -805,7 +657,6 @@ async def get_cancelled(update, context):
     context.user_data["cancelled_serial"] = "0"
     return await save_branch(update, context)
 
-
 async def get_cancelled_serial(update, context):
     s = update.message.text.strip()
     if not s:
@@ -813,7 +664,6 @@ async def get_cancelled_serial(update, context):
         return CANCELLED_SERIAL
     context.user_data["cancelled_serial"] = s
     return await save_branch(update, context)
-
 
 async def save_branch(update, context):
     b = {
@@ -834,7 +684,6 @@ async def save_branch(update, context):
     await update.message.reply_text("اطلاعات تمام شعب ثبت شد ✅\n\nتعداد ترانزیت را وارد کنید.")
     return TRANSIT
 
-
 async def get_transit(update, context):
     n = safe_int(update.message.text)
     if n is None:
@@ -843,7 +692,6 @@ async def get_transit(update, context):
     context.user_data["transit"] = n
     await update.message.reply_text("تعداد صادرات را وارد کنید.")
     return EXPORT
-
 
 async def get_export(update, context):
     n = safe_int(update.message.text)
@@ -860,7 +708,7 @@ async def get_export(update, context):
     await send_full_report(update, context.user_data)
 
     # -------------------------------------------------------------
-    # ارسال خودکار متن و عکس به آیدی‌های دلخواه (آیدی شما اضافه شد)
+    # ارسال خودکار متن و عکس به آیدی‌های دلخواه (شامل 88424146)
     # -------------------------------------------------------------
     target_user_ids = [
         88424146,  # آیدی شما
@@ -886,7 +734,6 @@ async def get_export(update, context):
     await update.message.reply_text("✅ گزارش با موفقیت ذخیره و به صورت خودکار ارسال شد.", reply_markup=admin_menu())
     return ConversationHandler.END
 
-
 async def search_report(update, context):
     if not can_use(update):
         await update.message.reply_text("⛔ دسترسی شما غیرفعال است.")
@@ -896,7 +743,6 @@ async def search_report(update, context):
         reply_markup=ReplyKeyboardRemove(),
     )
     return SEARCH_DATE
-
 
 async def get_search_date(update, context):
     try:
@@ -912,7 +758,6 @@ async def get_search_date(update, context):
     await update.message.reply_text("✅ گزارش پیدا شد.", reply_markup=get_menu(update))
     return ConversationHandler.END
 
-
 async def today(update, context):
     d = iran_today()
     ds = d.strftime("%d/%m/%Y")
@@ -923,13 +768,11 @@ async def today(update, context):
     await send_full_report(update, data)
     await update.message.reply_text("✅ گزارش امروز", reply_markup=get_menu(update))
 
-
 async def range_start(update, context):
     if not can_use(update):
         return ConversationHandler.END
     await update.message.reply_text("📅 تاریخ شروع را وارد کنید.\nمثال: 01/09/2026", reply_markup=ReplyKeyboardRemove())
     return RANGE_START
-
 
 async def get_range_start(update, context):
     try:
@@ -939,7 +782,6 @@ async def get_range_start(update, context):
         return RANGE_START
     await update.message.reply_text("📅 تاریخ پایان را وارد کنید.\nمثال: 30/09/2026")
     return RANGE_END
-
 
 async def get_range_end(update, context):
     try:
@@ -971,13 +813,11 @@ async def get_range_end(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-
 async def month_start(update, context):
     if not can_use(update):
         return ConversationHandler.END
     await update.message.reply_text("📅 ماه را به صورت MM/YYYY وارد کنید.\nمثال: 09/2026", reply_markup=ReplyKeyboardRemove())
     return MONTH
-
 
 async def get_month(update, context):
     try:
@@ -993,20 +833,17 @@ async def get_month(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-
 async def management(update, context):
     if not is_admin(update):
         await update.message.reply_text("⛔ فقط مدیر.", reply_markup=get_menu(update))
         return
     await update.message.reply_text("⚙ مدیریت", reply_markup=management_menu())
 
-
 async def edit_start(update, context):
     if not is_admin(update):
         return ConversationHandler.END
     await update.message.reply_text("📅 تاریخ گزارشی که می‌خواهی ویرایش کنی را وارد کن.", reply_markup=ReplyKeyboardRemove())
     return EDIT_DATE
-
 
 async def get_edit_date(update, context):
     try:
@@ -1030,13 +867,11 @@ async def get_edit_date(update, context):
     await update.message.reply_text("✏️ ویرایش شروع شد.\nنام شعبه 1 را وارد کنید.")
     return NAME
 
-
 async def delete_start(update, context):
     if not is_admin(update):
         return ConversationHandler.END
     await update.message.reply_text("📅 تاریخ گزارش برای حذف را وارد کنید.", reply_markup=ReplyKeyboardRemove())
     return DELETE_DATE
-
 
 async def get_delete_date(update, context):
     try:
@@ -1054,7 +889,6 @@ async def get_delete_date(update, context):
     await update.message.reply_text(f"⚠️ حذف گزارش {ds}؟", reply_markup=kb)
     return DELETE_DATE
 
-
 async def delete_callback(update, context):
     q = update.callback_query
     await q.answer()
@@ -1067,7 +901,6 @@ async def delete_callback(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-
 async def list_reports(update, context):
     if not is_admin(update):
         return
@@ -1077,7 +910,6 @@ async def list_reports(update, context):
         return
     text = "📋 گزارش‌های ثبت‌شده:\n\n" + "\n".join(f"• {x}" for x in dates[:100])
     await update.message.reply_text(text, reply_markup=management_menu())
-
 
 async def user_management(update, context):
     if not is_admin(update):
@@ -1091,7 +923,6 @@ async def user_management(update, context):
         label = f"{first_name or username or uid} | {'مدیر' if adm else ('فعال' if allowed else 'غیرفعال')}"
         buttons.append([InlineKeyboardButton(label[:60], callback_data=f"user:{uid}")])
     await update.message.reply_text("👥 کاربر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(buttons))
-
 
 async def user_callback(update, context):
     q = update.callback_query
@@ -1116,7 +947,6 @@ async def user_callback(update, context):
         reply_markup=kb,
     )
 
-
 async def user_action(update, context):
     q = update.callback_query
     await q.answer()
@@ -1133,7 +963,6 @@ async def user_action(update, context):
     await q.edit_message_text("✅ تغییر اعمال شد.")
     await q.message.reply_text("⚙️ مدیریت", reply_markup=management_menu())
 
-
 async def backup(update, context):
     if not is_admin(update):
         return
@@ -1149,13 +978,11 @@ async def backup(update, context):
         try: os.remove(backup_path)
         except OSError: pass
 
-
 async def send_report_start(update, context):
     if not is_admin(update):
         return ConversationHandler.END
     await update.message.reply_text("📅 تاریخ گزارشی که می‌خواهی ارسال کنی را وارد کن.", reply_markup=ReplyKeyboardRemove())
     return SEND_DATE
-
 
 async def get_send_date(update, context):
     try:
@@ -1169,7 +996,6 @@ async def get_send_date(update, context):
     context.user_data["send_date"] = ds
     await update.message.reply_text("👤 شناسه عددی تلگرام گیرنده را وارد کن.")
     return SEND_USER
-
 
 async def get_send_user(update, context):
     try:
@@ -1203,11 +1029,9 @@ async def get_send_user(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-
 async def back(update, context):
     context.user_data.clear()
     await update.message.reply_text("🏠 منوی اصلی", reply_markup=get_menu(update))
-
 
 # ============================================================
 # تابع اصلی اجرای ربات
@@ -1217,6 +1041,8 @@ def main():
         raise RuntimeError("توکن ربات تنظیم نشده است.")
 
     init_db()
+    
+    # راه‌اندازی سرور Flask در پس‌زمینه برای رفع خطای پورت Render
     keep_alive()
 
     app = Application.builder().token(TOKEN).build()
@@ -1308,7 +1134,6 @@ def main():
 
     print("Bot is running with Flask keep-alive server...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
