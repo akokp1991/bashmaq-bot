@@ -1,5 +1,5 @@
 token.txt
 bashmaq_reports.db
-_pycache_/
+__pycache__/
 *.pyc
 .env
