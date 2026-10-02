@@ -1061,7 +1061,7 @@ async def get_edit_date(update, context):
   )
   context.user_data["count"] = 2
   context.user_data["current_branch"] = 1
-  await update.message.reply_text("✏️️ ویرایش شروع شد.\nنام شعبه 1 را وارد کنید.")
+  await update.message.reply_text("✏ ویرایش شروع شد.\nنام شعبه 1 را وارد کنید.")
   return NAME
 
 
@@ -1105,7 +1105,7 @@ async def delete_callback(update, context):
     await q.edit_message_text(
         "🗑 گزارش حذف شد." if delete_report(ds) else "❌ گزارش پیدا نشد."
     )
-  await q.message.reply_text("⚙️ مدیریت", reply_markup=management_menu())
+  await q.message.reply_text("⚙️️ مدیریت", reply_markup=management_menu())
   context.user_data.clear()
   return ConversationHandler.END
 
@@ -1474,7 +1474,7 @@ def main():
       group=1,
   )
   app.add_handler(
-      MessageHandler(filters.Regex(r"^💾 پشتیبان‌گیری$"), backup), group=1
+      MessageHandler(filters.Regex(r"^💾 پشتیبان‌‌گیری$"), backup), group=1
   )
   app.add_handler(CallbackQueryHandler(user_callback, pattern=r"^user:"), group=1)
   app.add_handler(CallbackQueryHandler(user_action, pattern=r"^ua:"), group=1)
