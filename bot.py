@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 from zoneinfo import ZoneInfo
 
+from apscheduler.schedulers.background import BackgroundScheduler
 import jdatetime
 import openpyxl
 from telegram import (
@@ -75,6 +76,7 @@ MONTH = 13
 EDIT_DATE = 14
 DELETE_DATE = 15
 SEND_DATE, SEND_USER = 16, 17
+CONFIRM_SAVE = 18
 
 
 # ============================================================
@@ -554,9 +556,14 @@ def range_text(start, end):
 # ============================================================
 # ارسال گزارش (صرفاً متنی و فایل اکسل)
 # ============================================================
-async def send_full_report(update, data):
-  await update.message.reply_text(create_branch_report(data))
-  await update.message.reply_text(create_trade_report(data))
+async def send_full_report(update_or_query, data):
+  target = (
+      update_or_query.message
+      if hasattr(update_or_query, "message")
+      else update_or_query
+  )
+  await target.reply_text(create_branch_report(data))
+  await target.reply_text(create_trade_report(data))
 
 
 # ============================================================
@@ -589,7 +596,7 @@ async def cancel(update, context):
 
 
 # ============================================================
-# ثبت گزارش جدید
+# ثبت گزارش جدید (همراه با پیش‌نمایش تاییدیه)
 # ============================================================
 async def new_report(update, context):
   save_user(update.effective_user)
@@ -769,13 +776,37 @@ async def get_export(update, context):
     await update.message.reply_text("❌ فقط عدد وارد کنید.")
     return EXPORT
   context.user_data["export"] = n
-  context.user_data["created_by"] = update.effective_user.id
+
+  # نمایش پیش‌نمایش به جای ذخیره مستقیم
+  preview_text = "🔎 **پیش‌نمایش گزارش قبل از ثبت:**\n\n"
+  preview_text += create_branch_report(context.user_data) + "\n\n"
+  preview_text += create_trade_report(context.user_data)
+
+  kb = InlineKeyboardMarkup([
+      [InlineKeyboardButton("✅ تایید و ثبت نهایی", callback_data="conf_yes")],
+      [InlineKeyboardButton("❌ لغو و شروع مجدد", callback_data="conf_no")],
+  ])
+
+  await update.message.reply_text(preview_text, reply_markup=kb)
+  return CONFIRM_SAVE
+
+
+async def confirm_callback(update, context):
+  q = update.callback_query
+  await q.answer()
+  if q.data == "conf_no":
+    context.user_data.clear()
+    await q.edit_message_text("❌ ثبت گزارش لغو شد.")
+    await q.message.reply_text("🏠 منوی اصلی", reply_markup=admin_menu())
+    return ConversationHandler.END
+
+  context.user_data["created_by"] = q.from_user.id
   save_report(context.user_data)
-  await send_full_report(update, context.user_data)
+
+  await q.edit_message_text("✅ گزارش با موفقیت تایید و ذخیره شد.")
+  await send_full_report(q, context.user_data)
   context.user_data.clear()
-  await update.message.reply_text(
-      "✅ گزارش با موفقیت ذخیره شد.", reply_markup=admin_menu()
-  )
+  await q.message.reply_text("🏠 منوی اصلی", reply_markup=admin_menu())
   return ConversationHandler.END
 
 
@@ -898,7 +929,7 @@ async def get_range_end(update, context):
 
 
 # ============================================================
-# آمار ماهانه
+# آمار ماهانه و دستور تحلیلی /stats
 # ============================================================
 async def month_start(update, context):
   if not can_use(update):
@@ -944,6 +975,44 @@ async def get_month(update, context):
 
   context.user_data.clear()
   return ConversationHandler.END
+
+
+async def stats_command(update, context):
+  if not is_admin(update):
+    return
+  today_date = iran_today()
+  curr_start = date(today_date.year, today_date.month, 1)
+  _, curr_issued, curr_transit, curr_export, _, _ = range_summary(
+      curr_start, today_date
+  )
+
+  if today_date.month == 1:
+    prev_start = date(today_date.year - 1, 12, 1)
+    prev_end = date(today_date.year - 1, 12, 31)
+  else:
+    prev_start = date(today_date.year, today_date.month - 1, 1)
+    prev_end = curr_start - timedelta(days=1)
+
+  _, prev_issued, prev_transit, prev_export, _, _ = range_summary(
+      prev_start, prev_end
+  )
+
+  text = (
+      "📈 **تحلیل آماری مقایسه‌ای**\n\n"
+      f"🔹 **مجموع صادره این ماه:** {curr_issued} فقره\n"
+      f"🔸 **مجموع صادره ماه گذشته:** {prev_issued} فقره\n\n"
+      f"🚛 **ترانزیت این ماه:** {curr_transit} | **ماه گذشته:**"
+      f" {prev_transit}\n"
+      f"📦 **صادرات این ماه:** {curr_export} | **ماه گذشته:** {prev_export}\n\n"
+  )
+
+  if prev_issued > 0:
+    diff_percent = ((curr_issued - prev_issued) / prev_issued) * 100
+    status = "📈 رشد" if diff_percent >= 0 else "📉 افت"
+    text += f"وضعیت کلی نسبت به ماه قبل: {status} حدود {abs(diff_percent):.1f}%\n"
+
+  text += f"\n{FIXED_FOOTER}"
+  await update.message.reply_text(text)
 
 
 # ============================================================
@@ -992,7 +1061,7 @@ async def get_edit_date(update, context):
   )
   context.user_data["count"] = 2
   context.user_data["current_branch"] = 1
-  await update.message.reply_text("✏️ ویرایش شروع شد.\nنام شعبه 1 را وارد کنید.")
+  await update.message.reply_text("✏️️ ویرایش شروع شد.\nنام شعبه 1 را وارد کنید.")
   return NAME
 
 
@@ -1227,11 +1296,23 @@ async def back(update, context):
   await update.message.reply_text("🏠 منوی اصلی", reply_markup=get_menu(update))
 
 
-async def unknown(update, context):
-  if update.message and update.message.text:
-    await update.message.reply_text(
-        "لطفاً یکی از گزینه‌های منو را انتخاب کنید.", reply_markup=get_menu(update)
-    )
+# ============================================================
+# سیستم یادآور خودکار (ساعت ۲۱:۳۰)
+# ============================================================
+def check_daily_report(app):
+  today_ds = iran_today().strftime("%d/%m/%Y")
+  data = load_report(today_ds)
+  if not data:
+    try:
+      app.bot.send_message(
+          chat_id=ADMIN_ID,
+          text=(
+              "⚠️ **هشدار یادآور:**\nتا این لحظه گزارش امروز ("
+              f"{today_ds}) ثبت نشده است! لطفاً اقدام کنید."
+          ),
+      )
+    except Exception as e:
+      logger.error(f"Reminder error: {e}")
 
 
 # ============================================================
@@ -1243,6 +1324,17 @@ def main():
 
   init_db()
   app = Application.builder().token(TOKEN).build()
+
+  # راه‌اندازی یادآور خودکار ساعت 21:30
+  scheduler = BackgroundScheduler()
+  scheduler.add_job(
+      lambda: check_daily_report(app),
+      "cron",
+      hour=21,
+      minute=30,
+      timezone=TEHRAN,
+  )
+  scheduler.start()
 
   report_conv = ConversationHandler(
       entry_points=[
@@ -1276,6 +1368,9 @@ def main():
               MessageHandler(filters.TEXT & ~filters.COMMAND, get_transit)
           ],
           EXPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_export)],
+          CONFIRM_SAVE: [
+              CallbackQueryHandler(confirm_callback, pattern=r"^conf_")
+          ],
       },
       fallbacks=[
           CommandHandler("cancel", cancel),
@@ -1360,6 +1455,7 @@ def main():
 
   app.add_handler(CommandHandler("start", start), group=1)
   app.add_handler(CommandHandler("id", my_id), group=1)
+  app.add_handler(CommandHandler("stats", stats_command), group=1)
   app.add_handler(
       MessageHandler(filters.Regex(r"^📅 گزارش امروز$"), today), group=1
   )
@@ -1384,7 +1480,7 @@ def main():
   app.add_handler(CallbackQueryHandler(user_action, pattern=r"^ua:"), group=1)
   app.add_handler(MessageHandler(filters.Regex(r"^❌ لغو$"), cancel), group=1)
 
-  logger.info("Bot is running...")
+  logger.info("Bot is running with all professional features...")
   app.run_polling()
 
 
