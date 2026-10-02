@@ -1,9 +1,8 @@
-python-telegram-bot>=21.0
+python-telegram-bot
+arabic-reshaper
+python-bidi
 jdatetime
+matplotlib
+openpyxl
 Pillow
-arabic-reshaper
-python-bidi
 reportlab
-flask
-arabic-reshaper
-python-bidi
