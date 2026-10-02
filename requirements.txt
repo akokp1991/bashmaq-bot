@@ -5,3 +5,5 @@ arabic-reshaper
 python-bidi
 reportlab
 flask
+arabic-reshaper
+python-bidi
