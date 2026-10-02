@@ -16,7 +16,27 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+# تعریف مسیر فونت
+FONT_PATH = "Vazir-Code-FD-WOL.ttf"
 
+# تابع کمکی برای اصلاح و اتصال حروف فارسی
+def fix_persian(text):
+    if not text:
+        return ""
+    try:
+        reshaped_text = arabic_reshaper.reshape(str(text))
+        return get_display(reshaped_text)
+    except Exception:
+        return str(text)
+
+# ثبت فونت برای PDF
+PDF_FONT_NAME = None
+if FONT_PATH and os.path.exists(FONT_PATH):
+    try:
+        pdfmetrics.registerFont(TTFont("PersianFont", FONT_PATH))
+        PDF_FONT_NAME = "PersianFont"
+    except Exception:
+        PDF_FONT_NAME = None
 from telegram import (
     Update, ReplyKeyboardMarkup, ReplyKeyboardRemove,
     InlineKeyboardButton, InlineKeyboardMarkup,
@@ -371,28 +391,31 @@ def range_text(start, end):
     return s
 
 def make_lines(data):
-    if FONT_PATH is None:
-        raise RuntimeError("فونت فارسی پیدا نشد.")
-    title = ImageFont.truetype(FONT_PATH, 58)
-    sub = ImageFont.truetype(FONT_PATH, 40)
-    normal = ImageFont.truetype(FONT_PATH, 34)
-    bold = ImageFont.truetype(FONT_PATH, 38)
+    def make_lines(data):
+  if FONT_PATH is None:
+    raise RuntimeError(fix_persian("فونت فارسی پیدا نشد."))
 
-    lines = [
-        ("گزارش مانیفست مرز باشماق", title),
-        ("--------------------------------", sub),
-        (f"تاریخ میلادی: {data['date']}", normal),
-        (f"تاریخ شمسی: {data['shamsi_date']}", normal),
+  title = ImageFont.truetype(FONT_PATH, 58)
+  sub = ImageFont.truetype(FONT_PATH, 40)
+  normal = ImageFont.truetype(FONT_PATH, 34)
+  bold = ImageFont.truetype(FONT_PATH, 38)
+
+  lines = [
+      (fix_persian("گزارش مانیفست مرز باشماق"), title),
+      ("----------------------------------", sub),
+      (fix_persian(f"تاریخ میلادی: {data['date']}"), normal),
+      (fix_persian(f"تاریخ شمسی: {data['shamsi_date']}"), normal),
+      ("", normal),
+  ]
+  for i, b in enumerate(data.get("branches", []), 1):
+    lines += [
+        (fix_persian(f"مرز باشماق {i} شعبه {b['name']}"), bold),
+        (fix_persian(f"فقره مانیفست {b['issued']} تعداد صادره"), normal),
+        (fix_persian(f"سریال {b['start']} الی {b['end']}"), normal),
+        (fix_persian(f"تعداد ابطالی: {b['cancelled']}"), normal),
+        (fix_persian(f"سریال ابطالی: {b['cancelled_serial']}"), normal),
         ("", normal),
     ]
-    for i, b in enumerate(data.get("branches", []), 1):
-        lines += [
-            (f"شعبه {i} ({b['name']}) مرز باشماق", bold),
-            (f"تعداد صادره: {b['issued']} فقره مانیفست", normal),
-            (f"سریال: {b['start']} الی {b['end']}", normal),
-            (f"تعداد ابطالی: {b['cancelled']}", normal),
-            (f"سریال ابطالی: {b['cancelled_serial']}", normal),
-            ("", normal),
         ]
     lines += [
         ("--------------------------------", sub),
