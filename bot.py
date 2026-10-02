@@ -4,22 +4,10 @@ import logging
 import os
 import shutil
 import sqlite3
-import textwrap
 from zoneinfo import ZoneInfo
 
-import arabic_reshaper
-from bidi.algorithm import get_display
 import jdatetime
-
-# کتابخانه‌های اکسل و نمودار
-import matplotlib
-import matplotlib.pyplot as plt
 import openpyxl
-from PIL import Image, ImageDraw, ImageFont
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfgen import canvas
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -47,9 +35,6 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
-
-# تنظیم backend برای متلب (جهت اجرا روی سرور بدون GUI)
-matplotlib.use("Agg")
 
 # ============================================================
 # تنظیمات
@@ -431,27 +416,8 @@ def get_menu(update):
 
 
 # ============================================================
-# فونت و تصویر و اکسل و نمودار
+# توابع کمکی امن و اعتبارسنجی
 # ============================================================
-def find_font():
-  paths = [
-      os.path.join(BASE_DIR, "Vazir-Code-FD-WOL.ttf"),
-      r"C:\Windows\Fonts\tahoma.ttf",
-      r"C:\Windows\Fonts\arial.ttf",
-      os.path.join(BASE_DIR, "Vazirmatn-Regular.ttf"),
-      os.path.join(BASE_DIR, "BNAZANIN.ttf"),
-      "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-  ]
-  return next((p for p in paths if os.path.exists(p)), None)
-
-
-FONT_PATH = find_font()
-
-
-def ptext(s):
-  return get_display(arabic_reshaper.reshape(str(s)))
-
-
 def safe_int(s):
   try:
     n = int(str(s).strip())
@@ -474,7 +440,7 @@ def total_issued(data):
 
 
 # ============================================================
-# ایجاد خروجی اکسل و نمودار
+# ایجاد خروجی اکسل
 # ============================================================
 def create_excel_report(start, end):
   rows, issued, transit, export, cancelled, branch_totals = range_summary(
@@ -500,33 +466,8 @@ def create_excel_report(start, end):
   return path
 
 
-def create_chart_report(start, end):
-  rows, _, _, _, _, _ = range_summary(start, end)
-  if not rows:
-    return None
-
-  dates = [r["shamsi_date"] for r in rows]
-  totals = [total_issued(r) for r in rows]
-
-  plt.figure(figsize=(10, 5))
-  plt.plot(
-      dates, totals, marker="o", linestyle="-", color="#2b5c8f", linewidth=2
-  )
-  plt.xlabel("تاریخ شمسی", fontsize=12)
-  plt.ylabel("تعداد صادره", fontsize=12)
-  plt.title("روند صادرات مانیفست در بازه زمانی", fontsize=14)
-  plt.xticks(rotation=45, ha="right")
-  plt.tight_layout()
-
-  filename = f"chart_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
-  path = os.path.join(BASE_DIR, filename)
-  plt.savefig(path, dpi=300)
-  plt.close()
-  return path
-
-
 # ============================================================
-# متن گزارش
+# متن گزارش‌ها
 # ============================================================
 def create_branch_report(data):
   r = "باسلام\n\n(سه شعبه مرز باشماق)\n\n"
@@ -539,7 +480,7 @@ def create_branch_report(data):
         f"تعداد ابطالی {b['cancelled']} فقره\n"
         f"سریال ابطالی: {b['cancelled_serial']}\n\n"
     )
-  r += f"جمع کل صادرها : {total_issued(data)} فقره"
+  r += f"جمع کل صادرها : {total_issued(data)} فقره\n\n{FIXED_FOOTER}"
   return r
 
 
@@ -549,7 +490,7 @@ def create_trade_report(data):
       f"{data['date']}\n{data['shamsi_date']}\n\n"
       "تعداد صادره\n"
       f"ترانزیت : {data['transit']}\n"
-      f"صادرات : {data['export']}"
+      f"صادرات : {data['export']}\n\n{FIXED_FOOTER}"
   )
 
 
@@ -606,189 +547,16 @@ def range_text(start, end):
     )
   if not rows:
     s += "\n\n❌ در این بازه گزارشی ثبت نشده است."
+  s += f"\n\n{FIXED_FOOTER}"
   return s
 
 
 # ============================================================
-# JPG
-# ============================================================
-def make_lines(data):
-  if FONT_PATH is None:
-    raise RuntimeError("فونت فارسی پیدا نشد.")
-  title = ImageFont.truetype(FONT_PATH, 58)
-  sub = ImageFont.truetype(FONT_PATH, 40)
-  normal = ImageFont.truetype(FONT_PATH, 34)
-  bold = ImageFont.truetype(FONT_PATH, 38)
-
-  lines = [
-      ("گزارش مانیفست مرز باشماق", title),
-      ("--------------------------------", sub),
-      (f"تاریخ میلادی: {data['date']}", normal),
-      (f"تاریخ شمسی: {data['shamsi_date']}", normal),
-      ("", normal),
-  ]
-  for i, b in enumerate(data.get("branches", []), 1):
-    lines += [
-        (f"شعبه {i} ({b['name']}) مرز باشماق", bold),
-        (f"تعداد صادره: {b['issued']} فقره مانیفست", normal),
-        (f"سریال: {b['start']} الی {b['end']}", normal),
-        (f"تعداد ابطالی: {b['cancelled']}", normal),
-        (f"سریال ابطالی: {b['cancelled_serial']}", normal),
-        ("", normal),
-    ]
-  lines += [
-      ("--------------------------------", sub),
-      (f"جمع کل صادرها: {total_issued(data)} فقره", bold),
-      ("", normal),
-      (FIXED_FOOTER, sub),
-  ]
-  return lines
-
-
-def create_jpg_report(data, prefix="gozaresh"):
-  lines = make_lines(data)
-  width = 1600
-  pad = 100
-  spacing = 30
-  height = pad * 2
-
-  for text, font in lines:
-    if not text:
-      height += 30
-      continue
-    parts = (
-        textwrap.wrap(text, width=55, break_long_words=False)
-        if len(text) > 65
-        else [text]
-    )
-    for part in parts:
-      bb = font.getbbox(ptext(part))
-      height += bb[3] - bb[1] + spacing
-
-  image = Image.new("RGB", (width, height), "white")
-  draw = ImageDraw.Draw(image)
-  y = pad
-
-  for text, font in lines:
-    if not text:
-      y += 30
-      continue
-    parts = (
-        textwrap.wrap(text, width=55, break_long_words=False)
-        if len(text) > 65
-        else [text]
-    )
-    for part in parts:
-      disp = ptext(part)
-      bb = draw.textbbox((0, 0), disp, font=font)
-      tw = bb[2] - bb[0]
-      th = bb[3] - bb[1]
-      draw.text((width - pad - tw, y), disp, font=font, fill="black")
-      y += th + spacing
-
-  draw.rectangle([35, 35, width - 35, height - 35], outline="black", width=4)
-  filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-  path = os.path.join(BASE_DIR, filename)
-  image.save(path, "JPEG", quality=95)
-  return path
-
-
-def create_range_jpg(start, end):
-  rows, issued, transit, export, cancelled, branch_totals = range_summary(
-      start, end
-  )
-  branches = [
-      {
-          "name": name,
-          "issued": value,
-          "start": "-",
-          "end": "-",
-          "cancelled": 0,
-          "cancelled_serial": "0",
-      }
-      for name, value in branch_totals.items()
-  ]
-  data = {
-      "date": f"{start.strftime('%d/%m/%Y')} تا {end.strftime('%d/%m/%Y')}",
-      "shamsi_date": f"{shamsi(start)} تا {shamsi(end)}",
-      "branches": branches,
-      "transit": transit,
-      "export": export,
-  }
-  return create_jpg_report(data, "jam_bazeh")
-
-
-# ============================================================
-# PDF
-# ============================================================
-PDF_FONT_NAME = None
-if FONT_PATH:
-  try:
-    pdfmetrics.registerFont(TTFont("PersianFont", FONT_PATH))
-    PDF_FONT_NAME = "PersianFont"
-  except Exception:
-    PDF_FONT_NAME = None
-
-
-def create_pdf_report(data, prefix="gozaresh"):
-  filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.pdf"
-  path = os.path.join(BASE_DIR, filename)
-  c = canvas.Canvas(path, pagesize=A4)
-  w, h = A4
-  y = h - 55
-  font = PDF_FONT_NAME or "Helvetica"
-  c.setFont(font, 13)
-
-  raw_lines = (
-      create_branch_report(data).splitlines()
-      + ["", create_trade_report(data), "", FIXED_FOOTER]
-  )
-  for line in raw_lines:
-    if y < 55:
-      c.showPage()
-      c.setFont(font, 13)
-      y = h - 55
-    txt = ptext(line) if PDF_FONT_NAME else line
-    c.drawRightString(w - 40, y, txt[:150])
-    y -= 19
-  c.save()
-  return path
-
-
-# ============================================================
-# ارسال گزارش
+# ارسال گزارش (صرفاً متنی و فایل اکسل)
 # ============================================================
 async def send_full_report(update, data):
   await update.message.reply_text(create_branch_report(data))
   await update.message.reply_text(create_trade_report(data))
-
-  jpg = None
-  pdf = None
-  try:
-    jpg = create_jpg_report(data)
-    with open(jpg, "rb") as f:
-      await update.message.reply_photo(f, caption="🖼️ تصویر JPG گزارش")
-  except Exception as e:
-    logger.error(f"Error creating JPG: {e}")
-  finally:
-    if jpg:
-      try:
-        os.remove(jpg)
-      except OSError:
-        pass
-
-  try:
-    pdf = create_pdf_report(data)
-    with open(pdf, "rb") as f:
-      await update.message.reply_document(f, caption="📄 فایل PDF گزارش")
-  except Exception as e:
-    logger.error(f"Error creating PDF: {e}")
-  finally:
-    if pdf:
-      try:
-        os.remove(pdf)
-      except OSError:
-        pass
 
 
 # ============================================================
@@ -1060,7 +828,7 @@ async def today(update, context):
 
 
 # ============================================================
-# گزارش بازه‌ای (همراه با اکسل و نمودار متلب)
+# گزارش بازه‌ای (همراه با فایل اکسل)
 # ============================================================
 async def range_start(update, context):
   if not can_use(update):
@@ -1107,41 +875,6 @@ async def get_range_end(update, context):
   await update.message.reply_text(
       range_text(start, end), reply_markup=get_menu(update)
   )
-
-  # ارسال عکس خلاصه بازه
-  jpg = None
-  try:
-    jpg = create_range_jpg(start, end)
-    with open(jpg, "rb") as f:
-      await update.message.reply_photo(
-          f, caption="🖼 جمع کل صادره در بازه انتخابی"
-      )
-  except Exception as e:
-    logger.error(f"Range JPG error: {e}")
-  finally:
-    if jpg:
-      try:
-        os.remove(jpg)
-      except OSError:
-        pass
-
-  # ارسال نمودار گرافیکی متلب
-  chart_path = None
-  try:
-    chart_path = create_chart_report(start, end)
-    if chart_path:
-      with open(chart_path, "rb") as f:
-        await update.message.reply_photo(
-            f, caption="📈 نمودار روند صادرات در بازه"
-        )
-  except Exception as e:
-    logger.error(f"Chart error: {e}")
-  finally:
-    if chart_path:
-      try:
-        os.remove(chart_path)
-      except OSError:
-        pass
 
   # ارسال فایل اکسل خروجی
   excel_path = None
@@ -1195,7 +928,7 @@ async def get_month(update, context):
       range_text(start, end), reply_markup=get_menu(update)
   )
 
-  # خروجی اکسل و نمودار ماهانه
+  # خروجی اکسل ماهانه
   excel_path = create_excel_report(start, end)
   try:
     with open(excel_path, "rb") as f:
@@ -1288,7 +1021,7 @@ async def get_delete_date(update, context):
       [InlineKeyboardButton("❌ لغو", callback_data="del_no")],
   ])
   await update.message.reply_text(
-      f"⚠️️ حذف گزارش {ds}؟ این عملیات قابل برگشت نیست.", reply_markup=kb
+      f"⚠ حذف گزارش {ds}؟ این عملیات قابل برگشت نیست.", reply_markup=kb
   )
   return DELETE_DATE
 
@@ -1478,15 +1211,6 @@ async def get_send_user(update, context):
   try:
     await context.bot.send_message(chat_id=uid, text=create_branch_report(data))
     await context.bot.send_message(chat_id=uid, text=create_trade_report(data))
-    jpg = create_jpg_report(data)
-    try:
-      with open(jpg, "rb") as f:
-        await context.bot.send_photo(chat_id=uid, photo=f, caption="🖼️ تصویر JPG")
-    finally:
-      try:
-        os.remove(jpg)
-      except OSError:
-        pass
     await update.message.reply_text(
         "✅ گزارش برای گیرنده ارسال شد.", reply_markup=admin_menu()
     )
