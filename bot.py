@@ -455,7 +455,7 @@ def create_range_jpg(start, end):
         "export": export,
     }
     return create_jpg_report(data, "jam_bazeh")
-
+FONT_PATH = "Vazir-Code-FD-WOL.ttf"
 PDF_FONT_NAME = None
 if FONT_PATH:
     try:
